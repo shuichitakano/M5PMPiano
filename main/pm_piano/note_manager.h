@@ -27,6 +27,7 @@ class NoteManager
 
     std::array<Note, N_NOTES> notes_;
     std::array<int8_t, N_NOTES> noteNode_;
+    std::array<bool, N_NOTES> keyOnStateForDisp_;
 
     struct Node
     {
@@ -65,6 +66,10 @@ public:
                 const PedalState& pedal);
 
     size_t getCurrentNoteCount() const { return currentNoteCount_; }
+    const std::array<bool, N_NOTES>& getKeyOnStateForDisp() const
+    {
+        return keyOnStateForDisp_;
+    }
 
 protected:
     int getNodeIndex(Node* node) const;

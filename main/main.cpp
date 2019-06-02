@@ -6,6 +6,11 @@
 
 #include <pm_piano/piano.h>
 
+#include <graphics/bmp.h>
+#include <util/binary.h>
+
+#include <graphics/framebuffer.h>
+
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <freertos/task.h>
@@ -13,6 +18,8 @@
 #include <driver/i2s.h>
 
 #include <memory>
+
+DEF_LINKED_BINARY(kb_mini_bmp);
 
 namespace
 {
@@ -324,15 +331,110 @@ soundTask(void*)
 #endif
 }
 
+class KeyboardDisp
+{
+    graphics::Framebuffer fb_;
+    graphics::Texture tex_;
+
+    struct MaskDef
+    {
+        int x, y, w, h;
+        int ox; //< オクターブ先頭からのオフセット
+    };
+
+public:
+    void initialize()
+    {
+        tex_.initialize(GET_LINKED_BINARY_T(graphics::BMP, kb_mini_bmp));
+        fb_.resize(156, 20);
+    }
+
+    void clear()
+    {
+        fb_.put(tex_, 0, 0, 0, 20, 6, 20);
+        for (int i = 0; i < 7; ++i)
+        {
+            fb_.put(tex_, 6 + i * 21, 0, 6, 20, 21, 20);
+        }
+        fb_.put(tex_, 153, 0, 27, 20, 3, 20);
+    }
+
+    void update()
+    {
+        static const MaskDef maskDef[] = {
+            {0, 4, 2, 16, 15},  // a0
+            {8, 3, 2, 10, 17},  // a+0
+            {12, 4, 2, 16, 18}, // b0
+
+            {0, 4, 2, 16, 0},  // c
+            {8, 3, 2, 10, 2},  // c+
+            {18, 4, 2, 16, 3}, // d
+            {8, 3, 2, 10, 5},  // d+
+            {12, 4, 2, 16, 6}, // e
+
+            {0, 4, 2, 16, 9},   // f
+            {8, 3, 2, 10, 11},  // f+
+            {18, 4, 2, 16, 12}, // g
+            {8, 3, 2, 10, 14},  // g+
+            {18, 4, 2, 16, 15}, // a
+            {8, 3, 2, 10, 17},  // a+
+            {12, 4, 2, 16, 18}, // b
+
+            {27, 4, 2, 16, 0}, // c8
+        };
+
+        clear();
+
+        const auto& keyOnState = piano_.getKeyOnStateForDisp();
+        for (size_t i = 0; i < keyOnState.size(); ++i)
+        {
+            if (keyOnState[i])
+            {
+                int oct   = (i + 9) / 12;
+                int note  = (i + 9) % 12;
+                int baseX = (oct - 1) * 7 * 3 + 6;
+                int maskIdx;
+                if (i < 3)
+                {
+                    maskIdx = i;
+                }
+                else if (i == 87)
+                {
+                    maskIdx = 15;
+                }
+                else
+                {
+                    maskIdx = note + 3;
+                }
+
+                const auto& mask = maskDef[maskIdx];
+                fb_.putTrans(tex_,
+                             baseX + mask.ox,
+                             mask.y,
+                             mask.x,
+                             mask.y,
+                             mask.w,
+                             mask.h);
+            }
+        }
+
+        M5.Lcd.drawBitmap(2, 60, 156, 20, fb_.getBits());
+    }
+};
+
 extern "C" void
 app_main()
 {
-    DBOUT(("enter main.\n"));
+    DBOUT(("start\n"));
 
     M5.begin();
+    M5.Lcd.setRotation(3);
     M5.Lcd.setCursor(0, 0);
     M5.Lcd.setTextColor(0xffff);
     M5.Lcd.print("M5 PM PIANO");
+
+    KeyboardDisp kbDisp;
+    kbDisp.initialize();
 
     if (!io::initializeBluetooth() || !io::BLEManager::instance().initialize())
     {
@@ -357,15 +459,12 @@ app_main()
 
     while (1)
     {
+        kbDisp.update();
+
+        int v = M5.Axp.GetVbatData();
         M5.Lcd.setTextColor(0xff00, 0);
-        M5.Lcd.setCursor(0, 12);
-        M5.Lcd.printf("vbat:%d ", M5.Axp.GetVbatData());
-        M5.Lcd.setCursor(0, 20);
-        M5.Lcd.printf("Ich:%d ", M5.Axp.GetIchargeData());
-        M5.Lcd.setCursor(0, 28);
-        M5.Lcd.printf("Idch:%d ", M5.Axp.GetIdischargeData());
-        M5.Lcd.setCursor(0, 36);
-        M5.Lcd.printf("Vin:%d ", M5.Axp.GetVinData());
+        M5.Lcd.setCursor(160 - 6 * 6, 0);
+        M5.Lcd.printf("%d.%03dV", v / 1000, v % 1000);
 
         M5.Lcd.setTextColor(0x00ff, 0);
         M5.Lcd.setCursor(0, 46);
