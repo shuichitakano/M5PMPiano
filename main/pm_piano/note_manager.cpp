@@ -114,6 +114,7 @@ NoteManager::update(Note::SampleT* samples,
     xEventGroupSetBits(eventGroupHandle_, Event::START);
     int nn = process(samples, nSamples);
     //    printf("mn = %d\n", nn);
+    (void)nn;
 
     xEventGroupWaitBits(eventGroupHandle_,
                         Event::SYNC,
@@ -127,7 +128,8 @@ NoteManager::update(Note::SampleT* samples,
     {
         if (node->state_.idle)
         {
-            noteNode_[node->noteIndex_] = -1;
+            noteNode_[node->noteIndex_]          = -1;
+            keyOnStateForDisp_[node->noteIndex_] = false;
 
             auto next = node->next_;
             removeActive(node);
@@ -196,6 +198,7 @@ NoteManager::worker()
 
         int nn = process(workerSamples_.data(), workerSamples_.size());
         //        printf("wn %d\n", nn);
+        (void)nn;
 
         xEventGroupSetBits(eventGroupHandle_, Event::SYNC);
     }
@@ -224,7 +227,8 @@ NoteManager::keyOn(int note, float v)
         {
             node = popFrontActive();
 
-            noteNode_[node->noteIndex_] = -1;
+            noteNode_[node->noteIndex_]          = -1;
+            keyOnStateForDisp_[node->noteIndex_] = false;
         }
         assert(node);
 
@@ -234,6 +238,7 @@ NoteManager::keyOn(int note, float v)
     }
 
     notes_[note].keyOn(node->state_, v);
+    keyOnStateForDisp_[note] = true;
 
     // printf("allocated node: %p, idx %d, note %d\n",
     //        node,
@@ -266,6 +271,7 @@ NoteManager::keyOff(int note)
         removeActive(node);
         pushFrontActive(node);
     }
+    keyOnStateForDisp_[note] = false;
 }
 
 int

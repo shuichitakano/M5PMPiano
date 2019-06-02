@@ -31,6 +31,10 @@ public:
     {
         return noteManager_.getCurrentNoteCount();
     }
+    const std::array<bool, 88>& getKeyOnStateForDisp() const
+    {
+        return noteManager_.getKeyOnStateForDisp();
+    }
 };
 
 } // namespace physical_modeling_piano
