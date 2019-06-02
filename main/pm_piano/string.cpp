@@ -49,6 +49,7 @@ String::initialize(
     fracDelay_.initialize(D, std::max(1, (int)(D)));
     float tuningDelay = fracDelay_.computeGroupDelay(f, Fs);
 
+#if 0
     printf("total delay=%f/%f left=%d/%d right=%d/%d dispersion=%f lowpass=%f "
            "frac=%f/%f\n",
            delay1 * 2 + delay2 + delay3 + dispersionDelay + lowpassDelay +
@@ -62,6 +63,7 @@ String::initialize(
            lowpassDelay,
            tuningDelay,
            D);
+#endif
 
     d0a_.initialize(delay1);
     d0b_.initialize(delay1);

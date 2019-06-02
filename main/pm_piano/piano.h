@@ -26,6 +26,11 @@ public:
     void initialize(size_t nPoly);
     void
     update(int32_t* samples, size_t nSamples, io::MidiMessageQueue& midiIn);
+
+    size_t getCurrentNoteCount() const
+    {
+        return noteManager_.getCurrentNoteCount();
+    }
 };
 
 } // namespace physical_modeling_piano

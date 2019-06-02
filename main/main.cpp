@@ -20,9 +20,12 @@ namespace
 io::MidiMessageQueue midiIn_;
 physical_modeling_piano::Piano piano_;
 
+#define DELTA_SIGMA 0
+
 constexpr size_t sampleFreq =
     physical_modeling_piano::SystemParameters::sampleRate;
-// constexpr uint32_t sampleFreq = 44100 * 2;
+
+constexpr int overSampleShift = 2;
 
 static constexpr size_t UNIT_SAMPLES = 128;
 
@@ -165,6 +168,7 @@ getSample()
 void
 initIO()
 {
+#if DELTA_SIGMA
     {
         uint64_t _1 = 1;
         gpio_config_t cnf{};
@@ -209,11 +213,32 @@ initIO()
 
     initI2S(I2S_NUM_0, 26);
     initI2S(I2S_NUM_1, 0);
+#else
+    i2s_config_t cfg{};
+
+    cfg.mode =
+        (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN);
+    cfg.sample_rate          = sampleFreq << overSampleShift;
+    cfg.bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT;
+    cfg.channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT;
+    cfg.communication_format = i2s_comm_format_t(I2S_COMM_FORMAT_I2S_MSB);
+    cfg.intr_alloc_flags     = 0;
+    cfg.dma_buf_count        = 4;
+    cfg.dma_buf_len          = UNIT_SAMPLES << overSampleShift;
+    cfg.use_apll             = false;
+
+    auto r = i2s_driver_install(I2S_NUM_0, &cfg, 0, nullptr);
+    assert(r == ESP_OK);
+
+    i2s_set_dac_mode(I2S_DAC_CHANNEL_LEFT_EN);
+
+#endif
 }
 
 void
 soundTask(void*)
 {
+#if DELTA_SIGMA
     Encoder encL;
     while (1)
     {
@@ -238,6 +263,65 @@ soundTask(void*)
         // i2s_write(
         //     I2S_NUM_1, samples, sizeof(samples), &writeBytes, portMAX_DELAY);
     }
+#else
+    static int32_t samples[UNIT_SAMPLES];
+    static uint16_t pcm[((UNIT_SAMPLES << overSampleShift) << 1)];
+    int residual = 0;
+    int pv       = 32768;
+
+    while (1)
+    {
+        memset(samples, 0, sizeof(samples));
+        piano_.update(samples, UNIT_SAMPLES, midiIn_);
+
+        const auto* src = samples;
+        auto* dst       = pcm;
+        int ct          = UNIT_SAMPLES;
+        do
+        {
+            int v = *src + 32768;
+
+#if 0
+            dst[0] = v;
+            dst[1] = v;
+            ++src;
+            dst += 2;
+#else
+            int v0   = ((pv * 3 + v) >> 2) + residual;
+            int vq   = v0 & 0xff00;
+            residual = v0 - vq;
+            dst[0]   = vq;
+            dst[1]   = vq;
+
+            int v1   = ((pv + v) >> 1) + residual;
+            vq       = v1 & 0xff00;
+            residual = v1 - vq;
+            dst[2]   = vq;
+            dst[3]   = vq;
+
+            int v2   = ((pv + v * 3) >> 2) + residual;
+            vq       = v2 & 0xff00;
+            residual = v2 - vq;
+            dst[4]   = vq;
+            dst[5]   = vq;
+
+            int v3   = v + residual;
+            vq       = v3 & 0xff00;
+            residual = v3 - vq;
+            dst[6]   = vq;
+            dst[7]   = vq;
+
+            src += 1;
+            dst += 8;
+            pv = v;
+#endif
+        } while (--ct);
+
+        size_t writeBytes;
+        i2s_write(I2S_NUM_0, pcm, sizeof(pcm), &writeBytes, portMAX_DELAY);
+    }
+
+#endif
 }
 
 extern "C" void
@@ -265,11 +349,11 @@ app_main()
     midiIn_.setActive(true);
 
     DBOUT(("piano = %dbytes.\n", sizeof(piano_)));
-    piano_.initialize(8);
+    piano_.initialize(10);
 
     initIO();
 
-    xTaskCreate(&soundTask, "sound_task", 2048 + 1024, NULL, 5, NULL);
+    xTaskCreate(&soundTask, "sound_task", 2048 + 1024, NULL, 15, NULL);
 
     while (1)
     {
@@ -282,6 +366,10 @@ app_main()
         M5.Lcd.printf("Idch:%d ", M5.Axp.GetIdischargeData());
         M5.Lcd.setCursor(0, 36);
         M5.Lcd.printf("Vin:%d ", M5.Axp.GetVinData());
+
+        M5.Lcd.setTextColor(0x00ff, 0);
+        M5.Lcd.setCursor(0, 46);
+        M5.Lcd.printf("Voice:%zd ", piano_.getCurrentNoteCount());
 
         delay(1);
     }

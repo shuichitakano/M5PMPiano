@@ -116,6 +116,7 @@ Note::State::initialize(size_t allocatorSize)
 void
 Note::keyOn(State& state, float v) const
 {
+    //    printf("keyon %f\n", v);
     SimpleLinearAllocator allocator(state.allocatorBuffer_.data(),
                                     state.allocatorBuffer_.size() *
                                         sizeof(uint32_t));
