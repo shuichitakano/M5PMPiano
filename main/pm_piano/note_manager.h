@@ -9,7 +9,12 @@
 #include "pedal.h"
 #include "sys_params.h"
 #include <array>
+#include <atomic>
 #include <vector>
+
+#include <freertos/FreeRTOS.h>
+#include <freertos/event_groups.h>
+#include <freertos/task.h>
 
 namespace physical_modeling_piano
 {
@@ -37,6 +42,18 @@ class NoteManager
     Node* active_{}; // 双方向
     Node* activeTail_{};
 
+    const SystemParameters* currentSysParams_{};
+    const PedalState* currentPedalState_{};
+    std::vector<Node*> workNodes_;
+    std::atomic<int> workIdx_;
+
+    std::vector<Note::SampleT> workerSamples_{};
+
+    size_t currentNoteCount_{};
+
+    TaskHandle_t workerTaskHandle_{};
+    EventGroupHandle_t eventGroupHandle_{};
+
 public:
     void initialize(const SystemParameters& sysParams, size_t nPoly);
     void keyOn(int note, float v);
@@ -47,6 +64,8 @@ public:
                 const SystemParameters& sysParams,
                 const PedalState& pedal);
 
+    size_t getCurrentNoteCount() const { return currentNoteCount_; }
+
 protected:
     int getNodeIndex(Node* node) const;
 
@@ -56,6 +75,11 @@ protected:
     void pushFrontActive(Node* node);
     Node* popFrontActive();
     void removeActive(Node* node);
+
+    int process(Note::SampleT* samples, size_t nSamples);
+
+    static void workerEntry(void* p);
+    void worker();
 };
 
 } // namespace physical_modeling_piano

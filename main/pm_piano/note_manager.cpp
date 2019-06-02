@@ -10,6 +10,15 @@
 namespace physical_modeling_piano
 {
 
+namespace
+{
+enum Event
+{
+    START = 1 << 0,
+    SYNC  = 1 << 1,
+};
+}
+
 void
 NoteManager::initialize(const SystemParameters& sysParams, size_t nPoly)
 {
@@ -38,6 +47,21 @@ NoteManager::initialize(const SystemParameters& sysParams, size_t nPoly)
         n.state_.initialize(allocatorSize);
         freeNode(&n);
     }
+
+    workNodes_.resize(nPoly);
+
+    //
+    eventGroupHandle_ = xEventGroupCreate();
+    assert(eventGroupHandle_);
+
+    auto r = xTaskCreate(workerEntry,
+                         "worker",
+                         2048,
+                         this,
+                         //                         configMAX_PRIORITIES - 1,
+                         14,
+                         &workerTaskHandle_);
+    assert(r);
 }
 
 void
@@ -46,6 +70,7 @@ NoteManager::update(Note::SampleT* samples,
                     const SystemParameters& sysParams,
                     const PedalState& pedal)
 {
+#if 0
     auto* node = active_;
     while (node)
     {
@@ -69,12 +94,121 @@ NoteManager::update(Note::SampleT* samples,
             node = node->next_;
         }
     }
+#else
+    workNodes_.clear();
+    auto* node = active_;
+    while (node)
+    {
+        workNodes_.push_back(node);
+        node = node->next_;
+    }
+
+    workerSamples_.resize(nSamples);
+    std::fill(workerSamples_.begin(), workerSamples_.end(), 0);
+
+    currentSysParams_  = &sysParams;
+    currentPedalState_ = &pedal;
+
+    workIdx_.store(0, std::memory_order_release);
+
+    xEventGroupSetBits(eventGroupHandle_, Event::START);
+    int nn = process(samples, nSamples);
+    //    printf("mn = %d\n", nn);
+
+    xEventGroupWaitBits(eventGroupHandle_,
+                        Event::SYNC,
+                        pdTRUE /* clear */,
+                        pdFALSE /* wait for all bit */,
+                        portMAX_DELAY);
+
+    int n = 0;
+    node  = active_;
+    while (node)
+    {
+        if (node->state_.idle)
+        {
+            noteNode_[node->noteIndex_] = -1;
+
+            auto next = node->next_;
+            removeActive(node);
+            freeNode(node);
+            node = next;
+        }
+        else
+        {
+            node = node->next_;
+            ++n;
+        }
+    }
+    currentNoteCount_ = n;
+
+    const auto* ws = workerSamples_.data();
+    do
+    {
+        add(*samples, *samples, *ws);
+        ++samples;
+        ++ws;
+    } while (--nSamples);
+
+#endif
+}
+
+int
+NoteManager::process(Note::SampleT* samples, size_t nSamples)
+{
+    int ct = 0;
+    auto n = workNodes_.size();
+    while (1)
+    {
+        auto idx = workIdx_.fetch_add(1);
+        if (idx >= n)
+        {
+            return ct;
+        }
+
+        auto* node   = workNodes_[idx];
+        auto noteIdx = node->noteIndex_;
+        notes_[noteIdx].update(samples,
+                               nSamples,
+                               node->state_,
+                               *currentSysParams_,
+                               *currentPedalState_);
+        ++ct;
+    }
+}
+
+void
+NoteManager::workerEntry(void* p)
+{
+    ((NoteManager*)p)->worker();
+}
+
+void
+NoteManager::worker()
+{
+    while (1)
+    {
+        xEventGroupWaitBits(eventGroupHandle_,
+                            Event::START,
+                            pdTRUE /* clear */,
+                            pdFALSE /* wait for all bit */,
+                            portMAX_DELAY);
+
+        int nn = process(workerSamples_.data(), workerSamples_.size());
+        //        printf("wn %d\n", nn);
+
+        xEventGroupSetBits(eventGroupHandle_, Event::SYNC);
+    }
 }
 
 void
 NoteManager::keyOn(int note, float v)
 {
     note -= NOTE_BEGIN;
+    if (note < 0 || note >= N_NOTES)
+    {
+        return;
+    }
 
     Node* node;
     int nodeIndex = noteNode_[note];
@@ -111,6 +245,11 @@ void
 NoteManager::keyOff(int note)
 {
     note -= NOTE_BEGIN;
+    if (note < 0 || note >= N_NOTES)
+    {
+        return;
+    }
+
     int nodeIndex = noteNode_[note];
     if (nodeIndex < 0)
     {

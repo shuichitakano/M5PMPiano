@@ -33,8 +33,8 @@ struct SystemParameters
     using DeltaTimeT = FixedPoint<int32_t, 23>; // 1/44100
 
     // static constexpr uint32_t sampleRate = 44100;
-    // static constexpr uint32_t sampleRate = 32000;
-    static constexpr uint32_t sampleRate = 22050;
+    static constexpr uint32_t sampleRate = 32000;
+    // static constexpr uint32_t sampleRate = 22050;
 
     static constexpr float deltaT = 1.0f / sampleRate;
     static DeltaTimeT deltaTF;
