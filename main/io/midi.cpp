@@ -66,10 +66,8 @@ MidiMessageQueue::get(MidiMessage* m)
 {
     if (queue_.size())
     {
-        printf("get %p\n", m);
         if (queue_.pop(m))
         {
-            printf("success\n");
             return true;
         }
     }
@@ -81,7 +79,6 @@ MidiMessageQueue::put(const MidiMessage& m)
 {
     if (queue_.getSpace())
     {
-        printf("put %p\n", &m);
         queue_.push(m);
     }
 }
