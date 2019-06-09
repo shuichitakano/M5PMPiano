@@ -42,7 +42,15 @@ BLEMidiClient::onScanEntry(const BLEServiceEntry& e)
     DB(("%zd BLE Midi Devices.\n", list_.size()));
 
     //    return false;
+    deviceName_ = e.name;
     return true; // 見つけ次第問答無用で接続
+}
+
+void
+BLEMidiClient::onDisconnect()
+{
+    handle_ = -1;
+    deviceName_.clear();
 }
 
 void

@@ -433,6 +433,7 @@ struct BLEManager::Impl
             connectID_ = -1;
 
             services_.clear();
+            handler_->onDisconnect();
         }
 
         void addJob(Job* job)
@@ -786,6 +787,8 @@ public:
             break;
 
             case ESP_GAP_SEARCH_INQ_CMPL_EVT:
+                DBOUT(("scan end.\n"));
+                scanning_ = false;
                 break;
 
             default:
@@ -802,6 +805,7 @@ public:
                 break;
             }
             DBOUT(("stop scan successfully\n"));
+            scanning_ = false;
             break;
 
         case ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT:
@@ -1327,6 +1331,16 @@ public:
             charHandle, std::move(data), needResponse));
         return true;
     }
+
+    bool isActive(BLEClientHandler* h)
+    {
+        auto client = findClientByHandler(h);
+        if (client)
+        {
+            return client->isOpened();
+        }
+        return false;
+    }
 };
 
 BLEManager::BLEManager()
@@ -1352,6 +1366,12 @@ void
 BLEManager::startScan()
 {
     pimpl_->startScan();
+}
+
+bool
+BLEManager::isScanning() const
+{
+    return pimpl_->scanning_;
 }
 
 bool
@@ -1381,6 +1401,12 @@ BLEManager::removeAllBondedDevices()
         esp_ble_remove_bond_device(v.bd_addr);
     }
     DBOUT(("remove %d bonded devices.\n", dev_num));
+}
+
+bool
+BLEManager::isActive(BLEClientHandler& h)
+{
+    return pimpl_->isActive(&h);
 }
 
 BLEManager&

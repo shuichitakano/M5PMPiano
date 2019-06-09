@@ -27,12 +27,13 @@ namespace
 io::MidiMessageQueue midiIn_;
 physical_modeling_piano::Piano piano_;
 
-#define DELTA_SIGMA 0
+#define DELTA_SIGMA 1
 
 constexpr size_t sampleFreq =
     physical_modeling_piano::SystemParameters::sampleRate;
 
-constexpr int overSampleShift = 2;
+constexpr int overSampleShiftDeltaSigma = 1;
+constexpr int overSampleShift           = 2;
 
 static constexpr size_t UNIT_SAMPLES = 128;
 
@@ -193,14 +194,14 @@ initIO()
         i2s_config_t cfg{};
 
         cfg.mode            = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
-        cfg.sample_rate     = sampleFreq;
+        cfg.sample_rate     = sampleFreq << overSampleShiftDeltaSigma;
         cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
         cfg.channel_format  = I2S_CHANNEL_FMT_RIGHT_LEFT;
         cfg.communication_format =
             i2s_comm_format_t(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB);
         cfg.intr_alloc_flags = 0;
-        cfg.dma_buf_count    = 2;
-        cfg.dma_buf_len      = UNIT_SAMPLES;
+        cfg.dma_buf_count    = 4;
+        cfg.dma_buf_len      = UNIT_SAMPLES << overSampleShiftDeltaSigma;
         cfg.use_apll         = false;
 
         auto r = i2s_driver_install(port, &cfg, 0, nullptr);
@@ -253,22 +254,22 @@ soundTask(void*)
         memset(samples, 0, sizeof(samples));
         piano_.update(samples, UNIT_SAMPLES, midiIn_);
 
+        static uint32_t out[UNIT_SAMPLES << overSampleShiftDeltaSigma];
+        auto* dst = out;
+        auto* src = samples;
         for (int i = 0; i < UNIT_SAMPLES; ++i)
         {
-            samples[i] = encL.encode(samples[i] + 32768);
+            auto v = *src + 32768;
+            dst[0] = encL.encode(v);
+            dst[1] = encL.encode(v);
+            src += 1;
+            dst += 2;
         }
-#if 0
-        uint32_t sample[128];
-        for (int i = 0; i < 128; ++i)
-        {
-            sample[i] = getSample();
-        }
-#endif
+
         size_t writeBytes;
-        i2s_write(
-            I2S_NUM_0, samples, sizeof(samples), &writeBytes, portMAX_DELAY);
-        // i2s_write(
-        //     I2S_NUM_1, samples, sizeof(samples), &writeBytes, portMAX_DELAY);
+        i2s_write(I2S_NUM_0, out, sizeof(out), &writeBytes, portMAX_DELAY);
+        //        i2s_write(I2S_NUM_1, out, sizeof(out), &writeBytes,
+        //        portMAX_DELAY);
     }
 #else
     static int32_t samples[UNIT_SAMPLES];
@@ -418,7 +419,7 @@ public:
             }
         }
 
-        M5.Lcd.drawBitmap(2, 60, 156, 20, fb_.getBits());
+        M5.Lcd.drawBitmap(2, 50, 156, 20, fb_.getBits());
     }
 };
 
@@ -428,25 +429,29 @@ app_main()
     DBOUT(("start\n"));
 
     M5.begin();
+    M5.Axp.ScreenBreath(9);
     M5.Lcd.setRotation(3);
-    M5.Lcd.setCursor(0, 0);
+
+    M5.Lcd.fillRect(0, 0, 160, 12, graphics::makeColor(128, 20, 0));
+    M5.Lcd.setCursor(4, 2);
     M5.Lcd.setTextColor(0xffff);
     M5.Lcd.print("M5 PM PIANO");
 
     KeyboardDisp kbDisp;
     kbDisp.initialize();
 
-    if (!io::initializeBluetooth() || !io::BLEManager::instance().initialize())
+    auto& btManager = io::BLEManager::instance();
+    if (!io::initializeBluetooth() || !btManager.initialize())
     {
         DBOUT(("bluetooth initialize error."));
     }
     io::setBluetoothDeviceName("M5PMPiano");
 
-    io::BLEMidiClient::instance().setMIDIIn(&midiIn_);
-    io::BLEManager::instance().registerClientProfile(
-        io::BLEMidiClient::instance());
+    auto& btMidi = io::BLEMidiClient::instance();
+    btMidi.setMIDIIn(&midiIn_);
+    btManager.registerClientProfile(btMidi);
 
-    io::BLEManager::instance().startScan();
+    //    btManager.startScan();
 
     midiIn_.setActive(true);
 
@@ -457,17 +462,39 @@ app_main()
 
     xTaskCreate(&soundTask, "sound_task", 2048 + 1024, NULL, 15, NULL);
 
+    bool connected = false;
+
     while (1)
     {
+        if (!btManager.isActive(btMidi) && !btManager.isScanning())
+        {
+            DBOUT(("bt idle.\n"));
+            if (connected)
+            {
+                M5.Lcd.fillRect(0, 72, 160, 8, 0);
+            }
+            connected = false;
+            btManager.startScan();
+        }
+        if (!connected)
+        {
+            auto& name = btMidi.getDeviceName();
+            if (!name.empty())
+            {
+                M5.Lcd.setTextColor(0x02ff, 0);
+                M5.Lcd.setCursor(2, 72);
+                M5.Lcd.print(name.c_str());
+                connected = true;
+            }
+        }
+
         kbDisp.update();
 
         int v = M5.Axp.GetVbatData();
-        M5.Lcd.setTextColor(0xff00, 0);
-        M5.Lcd.setCursor(160 - 6 * 6, 0);
+        M5.Lcd.setTextColor(graphics::makeColor(168, 168, 168), 0);
+        M5.Lcd.setCursor(160 - 6 * 6, 14);
         M5.Lcd.printf("%d.%03dV", v / 1000, v % 1000);
-
-        M5.Lcd.setTextColor(0x00ff, 0);
-        M5.Lcd.setCursor(0, 46);
+        M5.Lcd.setCursor(2, 14);
         M5.Lcd.printf("Voice:%zd ", piano_.getCurrentNoteCount());
 
         delay(1);
