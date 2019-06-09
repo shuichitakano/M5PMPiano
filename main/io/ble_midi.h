@@ -15,6 +15,8 @@ class BLEMidiClient : public BLEClientHandler, public MidiOut
 {
     std::vector<BLEServiceEntry> list_;
 
+    std::string deviceName_;
+
     int handle_            = -1;
     bool readable_         = false;
     bool writable_         = false;
@@ -36,10 +38,14 @@ public:
     void onRead(const uint8_t* p, size_t size, int handle) override;
     void onWriteComplete(bool result, int handle) override;
 
+    void onDisconnect() override;
+
     // MIDIOut
     void put(const MidiMessage& m) override;
 
     void setMIDIIn(MidiMessageQueue* m) { midiIn_ = m; }
+
+    const std::string& getDeviceName() const { return deviceName_; }
 
     static BLEMidiClient& instance();
 };

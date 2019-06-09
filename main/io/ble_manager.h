@@ -59,6 +59,7 @@ public:
     virtual void onNotify(const uint8_t* p, size_t size, int handle) {}
     virtual void onRead(const uint8_t* p, size_t size, int handle) {}
     virtual void onWriteComplete(bool result, int handle) {}
+    virtual void onDisconnect() = 0;
 };
 
 ///
@@ -83,6 +84,9 @@ public:
                bool needResponse);
 
     void removeAllBondedDevices();
+
+    bool isScanning() const;
+    bool isActive(BLEClientHandler& h);
 
     static BLEManager& instance();
 };
